@@ -1,0 +1,443 @@
+德哥文档地址：
+https://github.com/digoal/blog/blob/master/README.md
+
+1. 查询表上的索引
+select * from pg_indexes where tablename='car_event'; 
+
+查询数据库大小
+select pg_size_pretty(pg_database_size('human_lib'));
+
+2. 查询数据库上的表
+SELECT
+table_name,
+pg_size_pretty(table_size) AS table_size,
+pg_size_pretty(indexes_size) AS indexes_size,
+pg_size_pretty(total_size) AS total_size
+FROM (
+SELECT
+table_name,
+pg_table_size(table_name) AS table_size,
+pg_indexes_size(table_name) AS indexes_size,
+pg_total_relation_size(table_name) AS total_size
+FROM (
+SELECT ('"' || table_schema || '"."' || table_name || '"') AS table_name
+FROM information_schema.tables
+) AS all_tables
+ORDER BY total_size DESC
+) AS pretty_sizes;
+
+
+
+------------------------------------------------------------------------------------------------------------------------
+ PostgreSQL 8.1.22 on x86_64-unknown-linux-gnu, compiled by GCC gcc (SUSE Linux) 4.3.4 [gcc-4_3-branch revision 152973]
+(1 row)
+注意：reindex 会造成全表锁。
+
+postgres=# reindex index t_idx;    -->重建单个索引
+REINDEX
+postgres=# reindex table test;     -->重建和表test有关的索引
+REINDEX
+
+
+
+--查询PG锁表信息
+select locktype,relation::regclass as rel,page||','||tuple as ctid,virtualxid as vxid,transactionid as xid,virtualtransaction as vxid2,pid,mode,granted from pg_locks;
+
+locktype  |   rel    | ctid |   vxid   | xid |  vxid2   |  pid   |      mode       | granted 
+------------+----------+------+----------+-----+----------+--------+-----------------+---------
+ relation   | 21293    |      |          |     | 81/5237  |  67449 | AccessShareLock | t
+ virtualxid |          |      | 81/5237  |     | 81/5237  |  67449 | ExclusiveLock   | t
+ relation   | pg_locks |      |          |     | 51/20385 |  47373 | AccessShareLock | t
+ virtualxid |          |      | 51/20385 |     | 51/20385 |  47373 | ExclusiveLock   | t
+ relation   | 21293    |      |          |     | 37/42196 | 117676 | AccessShareLock | t
+ virtualxid |          |      | 37/42196 |     | 37/42196 | 117676 | ExclusiveLock   | t
+ relation   | 21293    |      |          |     | 24/36257 |  67028 | AccessShareLock | t
+ virtualxid |          |      | 24/36257 |     | 24/36257 |  67028 | ExclusiveLock   | t
+(8 rows)
+
+
+pg关闭归档
+
+
+show work_mem;
+show maintenance_work_mem;
+show shared_buffers;
+show effective_cache_size;
+
+
+alter  system  set  archive_mode=off；
+
+alter system set work_mem='32MB';
+
+alter system set maintenance_work_mem='1GB'
+
+alter system set shared_buffers='16GB'
+
+alter system set effective_cache_size='32GB'
+
+select pg_reload_conf();
+
+
+
+--查看数据库大小
+select pg_size_pretty(pg_database_size('postgres'));
+--查看表大小
+select pg_size_pretty(pg_relation_size('engine_log'));
+--查看所有数据库大小
+select pg_database.datname, pg_size_pretty(pg_database_size(pg_database.datname)) AS size from pg_database;
+
+--pg杀进程
+select pg_terminate_backend(pid) from pg_stat_activity where state='idle';
+
+
+--查看postgis的版本
+select  postgis_full_version();
+
+
+升级postgis
+ALTER EXTENSION postgis UPDATE TO "2.5.2";
+
+./configure  --with-pgconfig=/opt/wl/pg_9.6.5/bin/pg_config  --with-geosconfig=/opt/wl/pg_9.6.5/plugin/geos/bin/geos-config --with-projdir=/opt/wl/pg_9.6.5/plugin/proj/
+
+--查看现有扩展
+select name from pg_available_extensions;
+
+
+1.logging_collector = on/off  ----  是否将日志重定向至文件中，默认是off（该配置修改后，需要重启DB服务）
+
+--解决多版本pg无法登陆的问题
+unix_socket_directories = '/var/run/postgresql, /tmp'   # comma-separated list of directories
+
+---------------------------------------------------------------------------------------------------------------------------
+--查询是否有脏数据
+select schemaname||'.'||relname,
+	   n_dead_tup,
+	   n_live_tup,
+	   coalesce(round(n_dead_tup * 100 / (case when n_live_tup + n_dead_tup = 0 then null else n_live_tup + n_dead_tup end ),2),0.00) as dead_tup_ratio
+  from pg_stat_all_tables
+ where 1=1
+   and n_dead_tup >= 10000
+ order by dead_tup_ratio desc
+ limit 10
+
+----------------------------------------------------------------------------------------------------------------------------
+
+--查询表行数和表大小
+SELECT FULL_TABLE_NAME,
+	pg_size_pretty ( table_size ) AS table_size,
+	pg_size_pretty ( indexes_size ) AS indexes_size,
+	pg_size_pretty ( total_size ) AS total_size,
+	rowCounts
+FROM
+	(
+	SELECT FULL_TABLE_NAME,
+		pg_table_size (FULL_TABLE_NAME ) AS table_size,
+		pg_indexes_size ( FULL_TABLE_NAME ) AS indexes_size,
+		pg_total_relation_size ( FULL_TABLE_NAME ) AS total_size,
+	  t.reltuples as rowCounts
+	FROM
+		( SELECT ( '"' || table_schema || '"."' || TABLE_NAME || '"' ) AS FULL_TABLE_NAME, table_name FROM information_schema.tables ) s 
+		left join pg_class t on s.table_name=t.relname
+	ORDER BY
+		total_size DESC 
+	) AS pretty_sizes;
+
+
+---------------------------------------------------------------------------------------------------------------------------
+
+vmstat -s | grep -i pages
+
+--------------------------------------------------------------------------------------------------------------------------
+
+1.更改表名 
+alter table 表名 rename to 新表名
+2.更改字段名
+alter table 表名 rename 字段名 to 新字段名
+3,更改字段类型
+如：ID 字段 原类型为 character varying(50) 新类型为integer
+其中，ID中原有数据为1，2，3等数字
+用如下语句更改
+ alter table dbo.titemtype alter column id type integer using to_number(id,'9');
+
+
+--统计PG的内存
+ ps aux|grep postgres|awk '{mem += $6}END {print mem/1024/1024}'
+
+
+
+提示SFCGAL.h不存在
+rpm -qa|grep SFCGAL
+rpm -e SFCGAL-1.2.2-1.rhel7.x86_64  --nodeps
+rpm -e SFCGAL-libs-1.2.2-1.rhel7.x86_64  --nodeps
+rpm -qa|grep SFCGAL
+./pg_basebackup -h localhost -U repl -D /opt/wl/pg_9.6.5/data/ -X stream -P
+
+
+\db
+查看表空间
+--查看各数据库对应的目录
+select oid,datname from pg_database;
+
+--查看表对应的目录
+select oid from pg_class where relname='region_info';
+
+--求中位数
+select PERCENTILE_DISC(0.5) within group (order by col) 中位数 from t;
+--求时间差秒数
+select extract(EPOCH FROM (now() - (now()-interval '1 day') ))/60;
+
+--查看表对应的表空间
+select * from pg_tables where schemaname='public';
+
+
+--设置日志最小级别
+alter system set log_destination='stderr';         --日志记录类型，默认是stderr，只记录错误输出
+alter system set log_duration='off';               --记录SQL执行时间
+alter system set log_statement='none';              --None表示不记录，ddl记录所有数据定义命令，mod记录所有ddl语句,加上数据修改语句                                                                                                                           ，all记录所有执行的语句
+alter system set log_min_duration_statement='-1'    --记录慢SQL
+select pg_reload_conf();
+即刻生效，慎用
+
+logging_collector = on/off  ----  是否将日志重定向至文件中
+
+--控制wal大小
+alter system set wal_level='minimal';   --需要重启
+select pg_reload_conf();
+
+alter system set fsync='off';   --写入加快，但发生崩溃时会使数据丢失
+
+切换wal日志
+select pg_switch_wal();
+清理pg_wal日志
+pg_archivecleanup /postgresql/pgsql/data/pg_wal 000000010000000000000005
+表示删除000000010000000000000005之前的所有日志
+--当前目录按照大小显示
+ll -Sh .
+
+
+--长时间SQL
+create extension pg_stat_statements;
+select pg_stat_reset();      --Reset all statistics counters for the current database to zero 
+select pg_stat_statements_reset();     --复位统计信息，清空之后不会触发autovacuum
+select * from pg_stat_statements order by total_time desc limit 5;
+--查询使用Buffer次数最多的SQL
+select * from pg_stat_statements order by shared_blks_hit+shared_blks_read desc limit 5;
+
+--PG状态
+pg_stat_activity 是一张postgresql的系统视图，它的每一行都表示一个系统进程，显示与当前会话的活动进程的一些信息，比如当前会话的状态和查询等。它的state字段表示当前进程的状态，一共有六种：
+1、Active(活动): 进程正在执行某个语句
+2、Idle(空闲): 进程正在等待客户端的指令
+3、idle in transaction(事务空闲):进程在处理事务的过程中，但当前没有执行任何语句
+4、idle in transaction (aborted)(事务空闲-退出):除了事务中声明一个错误外，其余情况与idle in transaction相同
+5、fastpath function call(快速通道函数调用): 后台正在执行某个快速通道函数
+6、Disabled(禁用): 报告状态被禁用
+
+
+--查看正在执行的SQL
+SELECT
+procpid,
+START,
+now() - START AS lap,
+current_query
+FROM
+(
+SELECT
+backendid,
+pg_stat_get_backend_pid (S.backendid) AS procpid,
+pg_stat_get_backend_activity_start (S.backendid) AS START,
+pg_stat_get_backend_activity (S.backendid) AS current_query
+FROM
+(
+SELECT
+pg_stat_get_backend_idset () AS backendid
+) AS S
+) AS S
+WHERE
+current_query <> '<IDLE>'
+ORDER BY
+lap DESC;
+
+--查看PG参数设置
+select name,setting,unit,context,short_desc from pg_settings
+--参数类别
+--internal:这些参数是只读参数，其中有些参数是postgres程序写死的。
+--postmaster:改变这些参数值需要重启实例。
+--sighup:在postgresql.conf文件中改变这些参数值，无需重启数据库，只需向postmater进程发送SIGHUP信号，让其重启装载配置新的参数值就可以了。
+--backend:跟sighup类似，改变生效只适用于新的链接，已有连接中无效.select pg_reload_conf();
+--superuser:这类参数可以由超级用户使用set改变，session级别。
+--user:同supperuser类似。
+--查看参数修改是否需要重启
+select name,context from pg_settings where name like 'wal_buffers';
+
+
+
+
+日志被放置在和主数据库文件不同的另外一个磁盘上会比较好。你可以通过把pg_wal目录移动到另外一个位置（当然在此期间服务器应当被关闭），然后在原来的位置上创建一个指向新位置的符号链接来实现重定位日志。
+
+
+---清空表同时重新生成序列值
+truncate table xxx RESTART IDENTITY；
+
+--不用密码运行psql和pg_dump
+解决办法：
+把密码放到环境变量里：
+export PGPASSWORD='your password'
+不想用了要删除该环境变量：
+export -n PGPASSWORD
+
+
+--oracle到PG的geo转换
+SELECT FID, SDO_UTIL.TO_WKTGEOMETRY(GEOMETRY), USERID, MAPID, KIND, ZIPCODE, TELEPHONE, ADMINCODE, DISPLAY_X, DISPLAY_Y, POI_ID, IMPORTANCE, VADMINCODE, CHAINCODE, PRIOR_AUTH, LINKID, SIDE, PID, TEL_TYPE, FOOD_TYPE, AIRPT_CODE, OPEN_24H, DATA_SRC, MESH_ID, POI_FLAG, RATING, TG_TYPE, ACCESSFLAG, NAME, EN_NAME, PY, ADDRESS, EN_ADDRESS, DBCNAME, DBCADDRESS FROM JIN_TIANJIN.TV_STATION_PT;  
+
+--切换schema：
+set search_path to partman
+--创建索引
+CREATE INDEX idx_device_device_id ON device_week_avg_snap (device_id); 
+
+
+--数据库表空间迁移
+创建目录：chown -R postgres.postgres /data/pg11/pgdata
+chmod 700 /data/pg11/pgdata
+创建新的表空间：create tablespace test owner postgres location '/data/pg11/pgdata';
+查看表空间： \db+
+注意，迁移过程中，TEST库是会加上全局锁的，无法读写。所以在实际中需要协调出业务空闲时间。
+alter database TEST set tablespace tbs_data;
+
+
+--数据量备份还原
+pg_dump -p 5432 -F custom -U postgres -d device_importutil_datapool   -f device_importutil_datapool.sql
+create  database b;
+pg_restore -p 5432 -d b -U postgres --jobs=4 --verbose governanceservice.sql
+
+
+--数据库杀DW库空闲会话脚本
+#!/bin/bash
+COUNT=`ps -ef|grep postgres|wc -l`
+if [ $COUNT -lt 1800 ]
+then
+psql -Upostgres -p 5432 -c "select pg_terminate_backend(pid) from pg_stat_activity where state='idle' and client_addr='12.0.0.101' and query like ''";
+else
+ps -ef|grep postgres|grep idle|grep '12.0.0.101'|awk '{print $2 ,$11}'|awk -F\( '{print $1}'|grep '12.0.0.101$'|awk '{print $1}'|xargs kill -9
+fi
+
+--extension说明
+ pg扩展extension,在一个环境编译之后，可以通过复制.so文件以及相关依赖的方法，在其他环境复用
+
+
+--监控正在频繁执行的SQL
+select  state,usename,datname,pid,wait_event_type,
+ wait_event,substr(query ,1,50),
+ xact_start, query_start,query
+  from  pg_stat_activity where state <>'idle';
+
+
+\dS+  查看分区
+--查看分区表数据量
+SELECT tableoid::regclass,count(*) from student group by 1 order by 1;
+  tableoid  | count
+------------+--------
+ student_p0 | 250150
+ student_p1 | 249730
+ student_p2 | 250129
+ student_p3 | 249991
+(4 rows)
+
+
+--重置统计信息
+pg_stat_statements是累积的统计，如果要查看某个时间段的统计，需要打快照
+用户也可以定期清理历史的统计信息，通过调用如下SQL
+select pg_stat_statements_reset();  
+
+
+--PG创建只读用户
+postgres=# create database database_test;
+CREATE DATABASE
+postgres=# create user user_read_only password 'user_read_only';
+CREATE ROLE
+postgres=# alter user user_read_only set default_transaction_read_only=on;
+ALTER ROLE
+--用户读取新创建的表需要设置此选项
+postgres=# alter default privileges in schema public grant select on tables to user_read_only; 
+ALTER DEFAULT PRIVILEGES
+切换到需要授权的数据库下，此处为database_test
+database_test=# grant select on all tables in schema public to user_read_only;
+GRANT
+
+
+检查：
+database_test=> select * from table_test ;
+ id 
+----
+  1
+(1 row)
+
+database_test=> insert into table_test values (1);
+ERROR:  cannot execute INSERT in a read-only transaction
+
+
+--多版本处理
+当一个环境上有多个版本的psql时，需要切换版本时
+cd /etc/profile.d
+source pg12_jiqun.sh
+即切换到pg12版本
+
+
+--慢SQL追踪
+使用pg_stat_statements插件定位慢SQL
+create extension pg_stat_statements;
+select pg_stat_reset();
+select pg_stat_statements_reset();
+等待一段时间（例如1分钟），使计数器积累足够的信息。
+1. 查询最耗时的SQL
+select * from pg_stat_statements order by total_time desc limit 5;
+2. 查询读取Buffer次数最多的SQL
+select * from pg_stat_statements order by shared_blks_hit+shared_blks_read desc limit 5;
+3. 当前长时间执行，一直不结束的SQL
+select datname,
+       usename,
+       client_addr,
+       application_name,
+       state,
+       backend_start,
+       xact_start,
+       xact_stay,
+       query_start,
+       query_stay,
+       replace(query, chr(10), ' ') as query
+from
+  (select pgsa.datname as datname,
+          pgsa.usename as usename,
+          pgsa.client_addr client_addr,
+          pgsa.application_name as application_name,
+          pgsa.state as state,
+          pgsa.backend_start as backend_start,
+          pgsa.xact_start as xact_start,
+          extract(epoch
+                  from (now() - pgsa.xact_start)) as xact_stay,
+          pgsa.query_start as query_start,
+          extract(epoch
+                  from (now() - pgsa.query_start)) as query_stay,
+          pgsa.query as query
+   from pg_stat_activity as pgsa
+   where pgsa.state != 'idle'
+     and pgsa.state != 'idle in transaction'
+     and pgsa.state != 'idle in transaction (aborted)') idleconnections
+order by query_stay desc
+limit 5;
+4. 查出使用表扫描最多的表
+select * from pg_stat_user_tables where n_live_tup > 100000 and seq_scan > 0 order by seq_tup_read desc limit 10;
+5. 查询当前正在运行的访问到上述表的慢查询
+select * from pg_stat_activity where query ilike '%<table name>%' and query_start - now() > interval '10 seconds';
+
+处理慢SQL
+对于上面的方法查出来的慢SQL，如下所示，首先需要做的是结束掉它们，使业务先恢复。
+select pg_cancel_backend(pid) from pg_stat_activity where  query like '%<query text>%' and pid != pg_backend_pid();
+select pg_terminate_backend(pid) from pg_stat_activity where  query like '%<query text>%' and pid != pg_backend_pid();
+如果这些SQL确实是业务上必需的，则需要对他们做如下优化。
+对查询涉及的表，执行ANALYZE [$Table]或VACUUM ANZLYZE [$Table]语句，更新表的统计信息，使查询计划更准确。为避免对业务影响，最好在业务低峰执行。
+注：[$Table]为查询涉及的表。
+选择一条如下SQL语句执行，查看SQL的执行计划，第一条SQL语句不会实际执行SQL语句，第二条SQL语句会实际执行而且能得到详细的执行信息，对其中的Table Scan涉及的表，建立索引。
+explain [$Query_Text]
+explain (buffers true, analyze true, verbose true) [$Query_Text]
+注：[$Query_Text]为SQL文件或语句。
+重新编写SQL语句，去除掉不必要的子查询、改写UNION ALL、使用JOIN CLAUSE固定连接顺序等，都是进一步深度优化SQL语句的手段
